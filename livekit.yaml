@@ -1,0 +1,15 @@
+# LiveKit server config — Malik Team Connect (group calls)
+# API key/secret are NOT stored here: the docker-compose service passes them
+# via the LIVEKIT_KEYS environment variable ("<apiKey>: <apiSecret>").
+port: 7880
+rtc:
+  tcp_port: 7881
+  # UDP media ports — must be open in the VPS firewall (see deploy/vps-setup.sh)
+  port_range_start: 50000
+  port_range_end: 60000
+  # Discover the VPS public IP automatically (needed so phones on mobile data
+  # can reach the media ports). If media fails, set node_ip to the VPS IP here.
+  use_external_ip: true
+logging:
+  level: info
+# Optional: use Redis for multi-node LiveKit — not needed for one VPS / 10 users.

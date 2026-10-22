@@ -1,0 +1,28 @@
+# Malik Team Connect — Caddy reverse proxy (automatic HTTPS via Let's Encrypt)
+# DOMAIN comes from the project-root .env file (used by Docker Compose).
+# DNS A records required (all pointing to this VPS):
+#   api.<DOMAIN>      → backend (REST API + Socket.IO)
+#   livekit.<DOMAIN>  → LiveKit signalling (WebSocket)
+#   app.<DOMAIN>      → browser web app (chat + calls, no APK needed)
+#   turn.<DOMAIN>     → coturn (no HTTPS site needed; record only)
+
+# Bare domain goes straight to the web app.
+{$DOMAIN} {
+	redir https://app.{$DOMAIN}{uri} permanent
+}
+
+app.{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:80
+}
+
+api.{$DOMAIN} {
+	encode gzip
+	# Socket.IO + REST both live on the backend service.
+	reverse_proxy backend:4000
+}
+
+livekit.{$DOMAIN} {
+	encode gzip
+	reverse_proxy livekit:7880
+}

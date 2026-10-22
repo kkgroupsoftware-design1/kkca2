@@ -1,0 +1,8 @@
+// Example production runtime config (see docs/WEB_APP.md).
+// The Docker deployment generates /config.js automatically from environment
+// variables — use this file only for a manual static deployment: rename it to
+// config.js in the served folder and replace example.com with your domain.
+window.__MTC_CONFIG__ = {
+  apiUrl: "https://api.example.com",
+  livekitUrl: "wss://livekit.example.com",
+};

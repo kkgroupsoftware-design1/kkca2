@@ -1,0 +1,39 @@
+# coturn configuration NOTES for Malik Team Connect
+# ─────────────────────────────────────────────────────────────────────────
+# The Docker Compose stack does NOT use this file by default — it starts
+# coturn with equivalent command-line flags built from your .env values
+# (TURN_USERNAME, TURN_CREDENTIAL, TURN_REALM, TURN_DOMAIN). This file is the
+# reference / alternative if you ever run coturn without Docker:
+#
+#   1. Copy to /etc/coturn/turnserver.conf
+#   2. Replace the values marked ← with your real ones
+#   3. Run: turnserver -c /etc/coturn/turnserver.conf
+#
+# Generate a strong credential:  openssl rand -hex 24
+# NOTE: static long-term credentials are shared with authenticated app users
+# (returned by GET /api/calls/config). For a closed 10-person team this is
+# the standard simple setup. Rotate TURN_CREDENTIAL if a phone is lost.
+
+listening-port=3478
+tls-listening-port=5349
+listening-ip=0.0.0.0
+relay-ip=0.0.0.0
+# external-ip=<VPS_PUBLIC_IP>        ← uncomment + set if calls fail across NATs
+min-port=60001
+max-port=65000
+fingerprint
+lt-cred-mech
+realm=turn.example.com             # ← your TURN_REALM
+user=malikteam:CHANGE_ME           # ← TURN_USERNAME:TURN_CREDENTIAL
+no-cli
+no-multicast-peers
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+
+# ── Optional TURNS (TLS on 5349) ──────────────────────────────────────────
+# Only enable after you have a cert for turn.<DOMAIN> (e.g. copy the cert
+# Caddy obtained, or use certbot standalone), then uncomment:
+# cert=/etc/coturn/certs/turn.example.com.crt
+# pkey=/etc/coturn/certs/turn.example.com.key
+# and add  turns:<TURN_DOMAIN>:5349?transport=tcp  to TURN_URLS in .env.

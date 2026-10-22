@@ -1,0 +1,122 @@
+# ══ Malik Team Connect — full VPS stack ══════════════════════════════════
+# Services: postgres + backend + livekit (group calls) + coturn (TURN) + caddy (HTTPS)
+# Setup: copy backend/.env.example to ./.env (project root), fill real values,
+# then:  docker compose up -d --build && docker compose exec backend npm run seed:prod
+# Full numbered guide: docs/VPS_DEPLOY.md
+# DNS A records needed: api.<DOMAIN>, livekit.<DOMAIN>, turn.<DOMAIN>, app.<DOMAIN> → VPS IP
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-malik_team_connect}
+      POSTGRES_USER: ${POSTGRES_USER:-malik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-malik} -d ${POSTGRES_DB:-malik_team_connect}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published to the host on purpose — only the backend talks to it.
+    # For a manual local peek, temporarily add: ports: ["127.0.0.1:5432:5432"]
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      # Inside Compose, Postgres is reached by service name — this overrides .env.
+      DATABASE_URL: postgres://${POSTGRES_USER:-malik}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-malik_team_connect}
+      DATABASE_SSL: "false"
+      UPLOAD_DIR: /data/uploads
+      USERS_FILE: seed/users.json
+      LIVEKIT_URL: wss://livekit.${DOMAIN:?DOMAIN must be set in .env}
+    volumes:
+      - uploads:/data/uploads
+      # Real seed passwords stay OUT of the image; mounted read-only, used once by the seed command.
+      - ./backend/seed/users.json:/app/seed/users.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose: ["4000"] # only Caddy (same Docker network) can reach it
+
+  web:
+    # Browser app (no APK needed). nginx serves the built app and generates
+    # /config.js from these URLs at container start — see web-app/entrypoint.sh.
+    build:
+      context: ./web-app
+    restart: unless-stopped
+    environment:
+      API_URL: https://api.${DOMAIN:?DOMAIN must be set in .env}
+      LIVEKIT_URL: wss://livekit.${DOMAIN:?DOMAIN must be set in .env}
+    expose: ["80"] # only Caddy (same Docker network) can reach it
+    depends_on: [backend]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # "<apiKey>: <apiSecret>" — must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?LIVEKIT_API_KEY must be set in .env}: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET must be set in .env}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7881:7881/tcp"            # RTC over TCP (fallback)
+      - "7882:7882/udp"            # RTC over UDP (single-port mode fallback)
+      - "50000-60000:50000-60000/udp" # RTC media port range (see livekit.yaml)
+    expose: ["7880"] # signalling — reached via Caddy at wss://livekit.<DOMAIN>
+
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    # Equivalent config lives in deploy/turnserver.conf.example (reference).
+    command:
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --listening-ip=0.0.0.0
+      - --relay-ip=0.0.0.0
+      - --min-port=60001
+      - --max-port=65000
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=${TURN_REALM:-turn.${DOMAIN}}
+      - --user=${TURN_USERNAME:?TURN_USERNAME must be set in .env}:${TURN_CREDENTIAL:?TURN_CREDENTIAL must be set in .env}
+      - --no-cli
+      - --no-multicast-peers
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      # For TURNS (TLS) add a cert mount + --cert/--pkey — see deploy/turnserver.conf.example.
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"                 # TURNS (active once a cert is configured)
+      - "60001-65000:60001-65000/udp"   # TURN relay range
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # Let's Encrypt certificates live here — back this up / don't delete
+      - caddy_config:/config
+    depends_on: [backend, livekit, web]
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:
